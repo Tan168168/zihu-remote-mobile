@@ -1,0 +1,913 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-eval' 'unsafe-inline' https://unpkg.com; object-src 'none'; base-uri 'self';">
+  <title>大众答题</title>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{
+      margin:0;
+      font-family:'Microsoft YaHei','Segoe UI',sans-serif;
+      background:linear-gradient(180deg,#4a90e2,#1e3a8a);
+      color:#fff;
+      min-height:100vh;
+      position:relative;
+      overflow-x:hidden;
+    }
+    /* 城市轮廓背景装饰 */
+    body::after{
+      content:'';
+      position:fixed;
+      bottom:0;
+      left:0;
+      right:0;
+      height:200px;
+      background:linear-gradient(transparent,rgba(255,255,255,0.1));
+      background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 100'%3E%3Cpath d='M0,80 L20,60 L40,70 L60,50 L80,65 L100,45 L120,55 L140,40 L160,50 L180,35 L200,45 L220,30 L240,40 L260,25 L280,35 L300,20 L320,30 L340,15 L360,25 L380,10 L400,20 L400,100 L0,100 Z' fill='rgba(255,255,255,0.15)'/%3E%3C/svg%3E");
+      background-size:100% auto;
+      background-repeat:repeat-x;
+      background-position:bottom;
+      pointer-events:none;
+      z-index:1;
+    }
+    .page{display:none;min-height:100vh;position:relative;z-index:2}
+    .page.active{display:flex;flex-direction:column}
+    /* 顶部标题栏 */
+    .header{
+      height:50px;
+      background:rgba(42,48,57,0.95);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding:0 16px;
+      position:sticky;
+      top:0;
+      z-index:100;
+      border-bottom:1px solid rgba(255,255,255,0.1);
+    }
+    .header-left{display:flex;align-items:center;gap:12px}
+    .header-close{width:32px;height:32px;border:none;background:transparent;color:#fff;font-size:20px;cursor:pointer;border-radius:4px;display:flex;align-items:center;justify-content:center}
+    .header-close:hover{background:rgba(255,255,255,0.1)}
+    .header-title{text-align:center;flex:1}
+    .header-title h1{font-size:18px;font-weight:600;margin:0}
+    .header-title .subtitle{font-size:12px;opacity:0.7;margin-top:2px}
+    .header-menu{width:32px;height:32px;border:none;background:transparent;color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:3px}
+    .header-menu span{width:4px;height:4px;background:#fff;border-radius:50%}
+    /* 卡片容器 */
+    .card{
+      width:90%;
+      max-width:480px;
+      margin:24px auto;
+      background:rgba(17,21,29,0.95);
+      border:1px solid rgba(255,255,255,0.1);
+      border-radius:16px;
+      padding:24px;
+      display:flex;
+      flex-direction:column;
+      gap:20px;
+      box-shadow:0 8px 32px rgba(0,0,0,0.3);
+    }
+    /* 登录页样式 */
+    .login-form{flex:1;display:flex;flex-direction:column;justify-content:center}
+    .form-group{display:flex;flex-direction:column;gap:8px;margin-bottom:16px}
+    .form-label{font-size:16px;color:#fff}
+    .form-input{
+      height:44px;
+      padding:0 12px;
+      border:1px solid rgba(255,255,255,0.2);
+      border-radius:8px;
+      background:rgba(15,20,28,0.8);
+      color:#fff;
+      font-size:16px;
+    }
+    .form-input::placeholder{color:rgba(255,255,255,0.5)}
+    .form-input:focus{outline:none;border-color:#1677ff;background:rgba(15,20,28,1)}
+    .form-disclaimer{
+      font-size:13px;
+      color:rgba(255,255,255,0.8);
+      line-height:1.6;
+      margin:16px 0;
+    }
+    .btn{
+      height:48px;
+      border:none;
+      border-radius:10px;
+      font-size:18px;
+      font-weight:600;
+      cursor:pointer;
+      transition:all 0.2s;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    .btn-primary{
+      background:linear-gradient(135deg,#1677ff,#0d5cd6);
+      color:#fff;
+      box-shadow:0 4px 12px rgba(22,119,255,0.3);
+    }
+    .btn-primary:active{transform:scale(0.98);box-shadow:0 2px 8px rgba(22,119,255,0.3)}
+    .btn-secondary{
+      background:transparent;
+      border:1px solid rgba(255,255,255,0.3);
+      color:#fff;
+    }
+    .btn-secondary:active{background:rgba(255,255,255,0.1)}
+    /* 等待开始页样式 */
+    .waiting-user{text-align:center;padding:20px 0;border-bottom:1px solid rgba(255,255,255,0.1);margin-bottom:20px}
+    .waiting-user-name{font-size:20px;font-weight:600;margin-bottom:8px}
+    .waiting-user-phone{font-size:16px;opacity:0.8}
+    .rules-list{
+      list-style:none;
+      padding:0;
+      margin:20px 0;
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+    }
+    .rules-item{
+      font-size:14px;
+      line-height:1.6;
+      padding-left:24px;
+      position:relative;
+    }
+    .rules-item::before{
+      content:counter(item);
+      counter-increment:item;
+      position:absolute;
+      left:0;
+      top:0;
+      width:20px;
+      height:20px;
+      background:rgba(22,119,255,0.2);
+      border-radius:50%;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-size:12px;
+      font-weight:600;
+    }
+    .rules-list{counter-reset:item}
+    .waiting-actions{
+      display:flex;
+      gap:12px;
+      margin-top:20px;
+    }
+    .waiting-actions .btn{flex:1}
+    /* 答题页样式 */
+    .quiz-header{
+      text-align:center;
+      padding:16px 0;
+      border-bottom:1px solid rgba(255,255,255,0.1);
+      margin-bottom:20px;
+    }
+    .quiz-status{
+      display:inline-block;
+      padding:4px 12px;
+      border-radius:12px;
+      font-size:12px;
+      margin-bottom:8px;
+    }
+    .quiz-status.connected{background:rgba(34,197,94,0.2);color:#22c55e}
+    .quiz-status.disconnected{background:rgba(239,68,68,0.2);color:#ef4444}
+    .quiz-question{
+      font-size:18px;
+      font-weight:600;
+      line-height:1.6;
+      margin-bottom:20px;
+      word-break:break-word;
+    }
+    .quiz-type{
+      font-size:14px;
+      color:rgba(255,255,255,0.7);
+      margin-bottom:12px;
+    }
+    .quiz-options{
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+      margin-bottom:20px;
+    }
+    .quiz-option{
+      padding:16px;
+      border:2px solid rgba(255,255,255,0.2);
+      border-radius:10px;
+      background:rgba(15,20,28,0.6);
+      cursor:pointer;
+      transition:all 0.2s;
+      font-size:16px;
+      position:relative;
+    }
+    .quiz-option:hover{background:rgba(15,20,28,0.8);border-color:rgba(22,119,255,0.5)}
+    .quiz-option.selected{
+      background:rgba(22,119,255,0.2);
+      border-color:#1677ff;
+    }
+    .quiz-option input[type="radio"],.quiz-option input[type="checkbox"]{
+      margin-right:12px;
+    }
+    .quiz-input{
+      width:100%;
+      min-height:120px;
+      padding:12px;
+      border:2px solid rgba(255,255,255,0.2);
+      border-radius:10px;
+      background:rgba(15,20,28,0.8);
+      color:#fff;
+      font-size:16px;
+      font-family:inherit;
+      resize:vertical;
+    }
+    .quiz-input:focus{outline:none;border-color:#1677ff}
+    .quiz-footer{
+      margin-top:20px;
+      padding-top:20px;
+      border-top:1px solid rgba(255,255,255,0.1);
+    }
+    .quiz-my-answer{
+      font-size:14px;
+      color:rgba(255,255,255,0.7);
+      margin-bottom:12px;
+      min-height:20px;
+    }
+    .quiz-submit{
+      width:100%;
+      height:48px;
+      background:linear-gradient(135deg,#10b981,#059669);
+      color:#fff;
+      border:none;
+      border-radius:10px;
+      font-size:18px;
+      font-weight:600;
+      cursor:pointer;
+      transition:all 0.2s;
+    }
+    .quiz-submit:disabled{
+      opacity:0.5;
+      cursor:not-allowed;
+    }
+    .quiz-submit:active:not(:disabled){transform:scale(0.98)}
+    .quiz-timer{
+      text-align:center;
+      font-size:16px;
+      font-weight:600;
+      color:#fbbf24;
+      margin:12px 0;
+    }
+    .error-msg{
+      padding:12px;
+      background:rgba(239,68,68,0.2);
+      border:1px solid rgba(239,68,68,0.5);
+      border-radius:8px;
+      color:#ef4444;
+      font-size:14px;
+      margin:12px 0;
+    }
+    @media (max-width:360px){
+      .card{padding:20px}
+      .header-title h1{font-size:16px}
+    }
+  </style>
+</head>
+<body>
+  <!-- 登录页 -->
+  <div class="page active" id="page-login">
+    <div class="header">
+      <div class="header-left">
+        <button class="header-close" onclick="handleClose()">×</button>
+      </div>
+      <div class="header-title">
+        <h1>大众答题</h1>
+        <div class="subtitle">cloud.yanchee.top</div>
+      </div>
+      <button class="header-menu">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+    </div>
+    <div class="card login-form">
+      <div class="form-group">
+        <label class="form-label">姓名:</label>
+        <input type="text" class="form-input" id="input-name" placeholder="请输入姓名" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">手机号:</label>
+        <input type="tel" class="form-input" id="input-phone" placeholder="请输入手机号" required pattern="[0-9]{11}">
+      </div>
+      <div class="form-disclaimer">
+        *信息收集仅用于本次活动答题环节,点击下方同意按钮后即可开始答题,并同意本次的信息收集。
+      </div>
+      <button class="btn btn-primary" onclick="handleLogin()">同意</button>
+    </div>
+  </div>
+
+  <!-- 等待开始页 -->
+  <div class="page" id="page-waiting">
+    <div class="header">
+      <div class="header-left">
+        <button class="header-close" onclick="handleLogout()">×</button>
+      </div>
+      <div class="header-title">
+        <h1>大众答题</h1>
+        <div class="subtitle">cloud.yanchee.top</div>
+      </div>
+      <button class="header-menu">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+    </div>
+    <div class="card">
+      <div class="waiting-user">
+        <div class="waiting-user-name" id="waiting-name"></div>
+        <div class="waiting-user-phone" id="waiting-phone"></div>
+      </div>
+      <ul class="rules-list">
+        <li class="rules-item">主持人开始读题时,同步推送题目到手机,即可开始答题。</li>
+        <li class="rules-item">答题提示音结束后,答题结束。</li>
+        <li class="rules-item">答题过程请您保持安静,以免干扰到场上选手。</li>
+        <li class="rules-item">若退出答题页面请重新扫码进入。</li>
+      </ul>
+      <div class="waiting-actions">
+        <button class="btn btn-secondary" onclick="showAnswerHistory()">答题记录</button>
+        <button class="btn btn-primary" onclick="handleLogout()">注销</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 答题页 -->
+  <div class="page" id="page-quiz">
+    <div class="header">
+      <div class="header-left">
+        <button class="header-close" onclick="handleBackToWaiting()">×</button>
+      </div>
+      <div class="header-title">
+        <h1 id="quiz-title">大众答题</h1>
+        <div class="subtitle" id="quiz-subtitle">cloud.yanchee.top</div>
+      </div>
+      <div class="header-menu">
+        <span class="quiz-status disconnected" id="mqtt-status">未连接</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="quiz-header">
+        <div class="quiz-status disconnected" id="connection-status">连接中...</div>
+        <div class="quiz-type" id="quiz-type-label"></div>
+      </div>
+      <div id="error-container"></div>
+      <div class="quiz-question" id="quiz-question"></div>
+      <div class="quiz-timer" id="quiz-timer" style="display:none"></div>
+      <div class="quiz-options" id="quiz-options"></div>
+      <textarea class="quiz-input" id="quiz-input" style="display:none" placeholder="请输入答案..."></textarea>
+      <div class="quiz-footer">
+        <div class="quiz-my-answer" id="quiz-my-answer"></div>
+        <button class="quiz-submit" id="quiz-submit" onclick="handleSubmitAnswer()" disabled>提交</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // 全局变量
+    let sessionId = '';
+    let userInfo = null;
+    let mqttClient = null;
+    let currentQuiz = null;
+    let selectedAnswers = [];
+    let deviceId = '';
+    let mqttConfig = null;
+
+    // 从URL获取参数
+    function getUrlParams() {
+      const params = new URLSearchParams(window.location.search);
+      sessionId = params.get('sessionId') || params.get('code')?.split('_')[0] || '0';
+      deviceId = `remote_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      return { sessionId, deviceId };
+    }
+
+    // 初始化
+    function init() {
+      const { sessionId: sid } = getUrlParams();
+      sessionId = sid;
+      console.log('[remote_mobile] 初始化, sessionId:', sessionId);
+      
+      // 检查是否已登录
+      const savedUser = localStorage.getItem('remote_mobile_user');
+      if (savedUser) {
+        try {
+          userInfo = JSON.parse(savedUser);
+          showPage('waiting');
+          document.getElementById('waiting-name').textContent = userInfo.name;
+          document.getElementById('waiting-phone').textContent = userInfo.phone;
+          // 尝试连接MQTT
+          connectMqtt();
+        } catch (e) {
+          console.error('[remote_mobile] 解析用户信息失败:', e);
+        }
+      }
+    }
+
+    // 显示指定页面
+    function showPage(pageName) {
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+      const page = document.getElementById(`page-${pageName}`);
+      if (page) {
+        page.classList.add('active');
+      }
+    }
+
+    // 登录处理
+    function handleLogin() {
+      const name = document.getElementById('input-name').value.trim();
+      const phone = document.getElementById('input-phone').value.trim();
+      
+      if (!name) {
+        alert('请输入姓名');
+        return;
+      }
+      if (!phone || !/^1[3-9]\d{9}$/.test(phone)) {
+        alert('请输入正确的手机号');
+        return;
+      }
+      
+      userInfo = { name, phone };
+      localStorage.setItem('remote_mobile_user', JSON.stringify(userInfo));
+      
+      document.getElementById('waiting-name').textContent = name;
+      document.getElementById('waiting-phone').textContent = phone;
+      showPage('waiting');
+      
+      // 连接MQTT
+      connectMqtt();
+    }
+
+    // 注销处理
+    function handleLogout() {
+      if (confirm('确定要注销吗？')) {
+        localStorage.removeItem('remote_mobile_user');
+        userInfo = null;
+        if (mqttClient) {
+          mqttClient.end();
+          mqttClient = null;
+        }
+        showPage('login');
+        document.getElementById('input-name').value = '';
+        document.getElementById('input-phone').value = '';
+      }
+    }
+
+    // 返回等待页
+    function handleBackToWaiting() {
+      showPage('waiting');
+      currentQuiz = null;
+      selectedAnswers = [];
+    }
+
+    // 关闭处理
+    function handleClose() {
+      if (confirm('确定要退出吗？')) {
+        window.close();
+      }
+    }
+
+    // 获取MQTT配置
+    async function fetchMqttConfig() {
+      try {
+        const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+        const host = window.location.host;
+        const response = await fetch(`${protocol}//${host}/api/sessions/${sessionId}/remote/mqtt-config`);
+        const data = await response.json();
+        
+        if (data.ok && data.config) {
+          return data.config;
+        } else {
+          throw new Error(data.error || '获取MQTT配置失败');
+        }
+      } catch (e) {
+        console.error('[remote_mobile] 获取MQTT配置失败:', e);
+        throw e;
+      }
+    }
+
+    // 连接MQTT
+    async function connectMqtt() {
+      try {
+        if (mqttClient) {
+          mqttClient.end();
+        }
+        
+        mqttConfig = await fetchMqttConfig();
+        console.log('[remote_mobile] MQTT配置:', { ...mqttConfig, hasPassword: !!mqttConfig.password });
+        
+        // 确定协议
+        let protocol = 'ws';
+        if (mqttConfig.port === 8084 || mqttConfig.port === 443) {
+          protocol = 'wss';
+        } else if (mqttConfig.port === 8883) {
+          protocol = 'mqtts';
+        } else if (mqttConfig.port === 1883) {
+          protocol = 'mqtt';
+        }
+        
+        const url = `${protocol}://${mqttConfig.host}:${mqttConfig.port}/mqtt`;
+        const clientId = `remote_${deviceId}_${Date.now()}`;
+        
+        const options = {
+          clientId: clientId,
+          protocolVersion: 4,
+          reconnectPeriod: 5000,
+          connectTimeout: 10000,
+          clean: true
+        };
+        
+        if (mqttConfig.username) {
+          options.username = mqttConfig.username;
+        }
+        
+        if (mqttConfig.password) {
+          options.password = mqttConfig.password;
+        }
+        
+        console.log('[remote_mobile] 连接MQTT:', url);
+        mqttClient = mqtt.connect(url, options);
+        
+        mqttClient.on('connect', () => {
+          console.log('[remote_mobile] MQTT连接成功');
+          updateConnectionStatus(true);
+          // 订阅题目主题
+          const topic = `zihu/session/${sessionId}/remote/quiz`;
+          mqttClient.subscribe(topic, (err) => {
+            if (err) {
+              console.error('[remote_mobile] 订阅失败:', err);
+            } else {
+              console.log('[remote_mobile] 已订阅:', topic);
+            }
+          });
+        });
+        
+        mqttClient.on('message', (topic, message) => {
+          try {
+            const data = JSON.parse(message.toString());
+            console.log('[remote_mobile] 收到MQTT消息:', data);
+            if (data.type === 'quiz' && data.quiz) {
+              handleQuizReceived(data);
+            }
+          } catch (e) {
+            console.error('[remote_mobile] 解析MQTT消息失败:', e);
+          }
+        });
+        
+        mqttClient.on('error', (err) => {
+          console.error('[remote_mobile] MQTT错误:', err);
+          updateConnectionStatus(false);
+          showError('MQTT连接错误: ' + err.message);
+        });
+        
+        mqttClient.on('close', () => {
+          console.log('[remote_mobile] MQTT连接关闭');
+          updateConnectionStatus(false);
+        });
+        
+        mqttClient.on('reconnect', () => {
+          console.log('[remote_mobile] MQTT重连中...');
+          updateConnectionStatus(false);
+        });
+        
+      } catch (e) {
+        console.error('[remote_mobile] 连接MQTT失败:', e);
+        showError('连接失败: ' + e.message);
+        updateConnectionStatus(false);
+      }
+    }
+
+    // 更新连接状态
+    function updateConnectionStatus(connected) {
+      const statusEl = document.getElementById('connection-status');
+      const mqttStatusEl = document.getElementById('mqtt-status');
+      if (statusEl) {
+        statusEl.textContent = connected ? '已连接' : '未连接';
+        statusEl.className = `quiz-status ${connected ? 'connected' : 'disconnected'}`;
+      }
+      if (mqttStatusEl) {
+        mqttStatusEl.textContent = connected ? '已连接' : '未连接';
+        mqttStatusEl.className = `quiz-status ${connected ? 'connected' : 'disconnected'}`;
+      }
+    }
+
+    // 显示错误信息
+    function showError(msg) {
+      const errorContainer = document.getElementById('error-container');
+      if (errorContainer) {
+        errorContainer.innerHTML = `<div class="error-msg">${msg}</div>`;
+        setTimeout(() => {
+          errorContainer.innerHTML = '';
+        }, 5000);
+      }
+    }
+
+    // 处理接收到的题目
+    function handleQuizReceived(data) {
+      console.log('[remote_mobile] 收到题目:', data);
+      currentQuiz = data.quiz;
+      
+      // 切换到答题页
+      showPage('quiz');
+      
+      // 更新题目显示
+      const questionEl = document.getElementById('quiz-question');
+      const typeEl = document.getElementById('quiz-type-label');
+      const optionsEl = document.getElementById('quiz-options');
+      const inputEl = document.getElementById('quiz-input');
+      const submitBtn = document.getElementById('quiz-submit');
+      const myAnswerEl = document.getElementById('quiz-my-answer');
+      
+      if (questionEl && currentQuiz.title) {
+        questionEl.textContent = currentQuiz.title || '';
+      }
+      
+      // 题目类型
+      const typeNames = {
+        single: '单选题',
+        multi: '多选题',
+        multiple: '多选题',
+        judge: '判断题',
+        fill: '填空题',
+        answer: '简答题',
+        text: '填空题',
+        image: '图片题'
+      };
+      const quizType = String(currentQuiz.type || '').toLowerCase();
+      const typeName = typeNames[quizType] || '题目';
+      
+      if (typeEl) {
+        typeEl.textContent = typeName;
+      }
+      
+      // 清空之前的选择
+      selectedAnswers = [];
+      if (myAnswerEl) {
+        myAnswerEl.textContent = '';
+      }
+      
+      // 显示选项或输入框
+      if (optionsEl) optionsEl.innerHTML = '';
+      if (inputEl) inputEl.style.display = 'none';
+      
+      if (quizType === 'single' || quizType === 'multi' || quizType === 'multiple' || quizType === 'judge') {
+        // 选择题或判断题
+        if (optionsEl) {
+          const options = currentQuiz.options || [];
+          options.forEach((opt, index) => {
+            const optKey = String(opt.key || String.fromCharCode(65 + index));
+            const optLabel = String(opt.label || opt);
+            const optEl = document.createElement('div');
+            optEl.className = 'quiz-option';
+            optEl.dataset.key = optKey;
+            
+            if (quizType === 'single' || quizType === 'judge') {
+              optEl.innerHTML = `
+                <input type="radio" name="quiz-answer" value="${optKey}" id="opt-${index}" onchange="handleOptionChange('${optKey}', 'single')">
+                <label for="opt-${index}">${optKey}. ${optLabel}</label>
+              `;
+            } else {
+              optEl.innerHTML = `
+                <input type="checkbox" name="quiz-answer" value="${optKey}" id="opt-${index}" onchange="handleOptionChange('${optKey}', 'multiple')">
+                <label for="opt-${index}">${optKey}. ${optLabel}</label>
+              `;
+            }
+            
+            optEl.onclick = function(e) {
+              if (e.target.tagName !== 'INPUT') {
+                const input = optEl.querySelector('input');
+                if (input) {
+                  input.checked = !input.checked;
+                  input.dispatchEvent(new Event('change'));
+                }
+              }
+            };
+            
+            optionsEl.appendChild(optEl);
+          });
+        }
+      } else {
+        // 填空题或简答题
+        if (inputEl) {
+          inputEl.style.display = 'block';
+          inputEl.value = '';
+        }
+      }
+      
+      // 显示计时器
+      if (data.timerSeconds && data.timerSeconds > 0) {
+        const timerEl = document.getElementById('quiz-timer');
+        if (timerEl) {
+          timerEl.style.display = 'block';
+          startTimer(data.timerSeconds, timerEl);
+        }
+      } else {
+        const timerEl = document.getElementById('quiz-timer');
+        if (timerEl) {
+          timerEl.style.display = 'none';
+        }
+      }
+      
+      // 启用提交按钮
+      if (submitBtn) {
+        submitBtn.disabled = false;
+      }
+    }
+
+    // 处理选项变化
+    function handleOptionChange(key, type) {
+      if (type === 'single' || type === 'judge') {
+        // 单选题或判断题：只能选一个
+        selectedAnswers = [key];
+        // 更新UI选中状态
+        document.querySelectorAll('.quiz-option').forEach(opt => {
+          opt.classList.remove('selected');
+        });
+        const optEl = document.querySelector(`.quiz-option[data-key="${key}"]`);
+        if (optEl) {
+          optEl.classList.add('selected');
+        }
+      } else {
+        // 多选题：可以选多个
+        const index = selectedAnswers.indexOf(key);
+        if (index > -1) {
+          selectedAnswers.splice(index, 1);
+          const optEl = document.querySelector(`.quiz-option[data-key="${key}"]`);
+          if (optEl) {
+            optEl.classList.remove('selected');
+          }
+        } else {
+          selectedAnswers.push(key);
+          const optEl = document.querySelector(`.quiz-option[data-key="${key}"]`);
+          if (optEl) {
+            optEl.classList.add('selected');
+          }
+        }
+      }
+      
+      // 更新"我的答案"显示
+      const myAnswerEl = document.getElementById('quiz-my-answer');
+      if (myAnswerEl && selectedAnswers.length > 0) {
+        myAnswerEl.textContent = '我的作答: ' + selectedAnswers.sort().join(', ');
+      } else if (myAnswerEl) {
+        myAnswerEl.textContent = '';
+      }
+    }
+
+    // 计时器
+    let timerInterval = null;
+    function startTimer(seconds, timerEl) {
+      if (timerInterval) {
+        clearInterval(timerInterval);
+      }
+      
+      let remaining = seconds;
+      const updateTimer = () => {
+        if (remaining <= 0) {
+          clearInterval(timerInterval);
+          timerEl.textContent = '时间到';
+          const submitBtn = document.getElementById('quiz-submit');
+          if (submitBtn) {
+            submitBtn.disabled = true;
+          }
+          return;
+        }
+        
+        const minutes = Math.floor(remaining / 60);
+        const secs = remaining % 60;
+        timerEl.textContent = `剩余时间: ${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        remaining--;
+      };
+      
+      updateTimer();
+      timerInterval = setInterval(updateTimer, 1000);
+    }
+
+    // 提交答案
+    async function handleSubmitAnswer() {
+      if (!currentQuiz || !mqttClient) {
+        alert('题目或连接不可用');
+        return;
+      }
+      
+      let answer = [];
+      const quizType = String(currentQuiz.type || '').toLowerCase();
+      
+      if (quizType === 'single' || quizType === 'multi' || quizType === 'multiple' || quizType === 'judge') {
+        // 选择题或判断题
+        if (selectedAnswers.length === 0) {
+          alert('请选择答案');
+          return;
+        }
+        answer = selectedAnswers;
+      } else {
+        // 填空题或简答题
+        const inputEl = document.getElementById('quiz-input');
+        const answerText = inputEl ? inputEl.value.trim() : '';
+        if (!answerText) {
+          alert('请输入答案');
+          return;
+        }
+        answer = [answerText];
+      }
+      
+      // 通过MQTT发布答案
+      const answerTopic = `zihu/session/${sessionId}/remote/answer`;
+      const answerData = {
+        type: 'answer',
+        sessionId: sessionId,
+        deviceId: deviceId,
+        questionId: String(currentQuiz.id || ''),
+        question: String(currentQuiz.id || ''),
+        answer: answer,
+        timestamp: Date.now(),
+        stageId: currentQuiz.stageId,
+        questionIndex: currentQuiz.questionIndex,
+        durationMs: 0, // 可以计算答题耗时
+        userInfo: userInfo
+      };
+      
+      try {
+        mqttClient.publish(answerTopic, JSON.stringify(answerData), { qos: 1 }, (err) => {
+          if (err) {
+            console.error('[remote_mobile] 发布答案失败:', err);
+            alert('提交失败: ' + err.message);
+          } else {
+            console.log('[remote_mobile] 答案已提交');
+            alert('提交成功');
+            
+            // 保存答题记录
+            saveAnswerHistory(currentQuiz, answer);
+            
+            // 清空当前题目
+            currentQuiz = null;
+            selectedAnswers = [];
+            
+            // 返回等待页
+            showPage('waiting');
+          }
+        });
+      } catch (e) {
+        console.error('[remote_mobile] 提交答案异常:', e);
+        alert('提交失败: ' + e.message);
+      }
+    }
+
+    // 保存答题记录
+    function saveAnswerHistory(quiz, answer) {
+      try {
+        const key = 'remote_mobile_answer_history';
+        let history = JSON.parse(localStorage.getItem(key) || '[]');
+        history.push({
+          quizId: quiz.id,
+          question: quiz.title,
+          answer: answer,
+          timestamp: Date.now(),
+          sessionId: sessionId
+        });
+        // 只保留最近50条记录
+        if (history.length > 50) {
+          history = history.slice(-50);
+        }
+        localStorage.setItem(key, JSON.stringify(history));
+      } catch (e) {
+        console.error('[remote_mobile] 保存答题记录失败:', e);
+      }
+    }
+
+    // 显示答题记录
+    function showAnswerHistory() {
+      try {
+        const key = 'remote_mobile_answer_history';
+        const history = JSON.parse(localStorage.getItem(key) || '[]');
+        
+        if (history.length === 0) {
+          alert('暂无答题记录');
+          return;
+        }
+        
+        let msg = '答题记录:\n\n';
+        history.slice(-10).reverse().forEach((item, index) => {
+          msg += `${index + 1}. ${item.question}\n`;
+          msg += `   答案: ${Array.isArray(item.answer) ? item.answer.join(', ') : item.answer}\n`;
+          msg += `   时间: ${new Date(item.timestamp).toLocaleString()}\n\n`;
+        });
+        alert(msg);
+      } catch (e) {
+        console.error('[remote_mobile] 显示答题记录失败:', e);
+        alert('显示答题记录失败');
+      }
+    }
+
+    // 页面加载完成后初始化
+    document.addEventListener('DOMContentLoaded', () => {
+      init();
+    });
+  </script>
+</body>
+</html> 
